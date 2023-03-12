@@ -44,7 +44,7 @@ export default class AuthService {
     // IF NOT EXISTS
     // FOR (user:User)
     // REQUIRE user.email IS UNIQUE;
-    
+
     // tag::constraintError[]
     // TODO: Handle Unique constraints in the database
     // if (email !== 'graphacademy@neo4j.com') {
@@ -120,18 +120,56 @@ export default class AuthService {
    */
   // tag::authenticate[]
   async authenticate(email, unencryptedPassword) {
-    // TODO: Authenticate the user from the database
-    if (email === 'graphacademy@neo4j.com' && unencryptedPassword === 'letmein') {
-      const { password, ...claims } = user.properties
-
-      return {
-        ...claims,
-        token: jwt.sign(claims, JWT_SECRET)
-      }
+    // Open a new session
+    const session = this.driver.session()
+  
+    // Find the user node within a Read Transaction
+    const res = await session.executeRead(
+      tx => tx.run(
+        'MATCH (u:User {email: $email}) RETURN u',
+        { email }
+      )
+    )
+  
+    // Close the session
+    await session.close()
+  
+    // Verify the user exists
+    if ( res.records.length === 0 ) {
+      return false
     }
-
-    return false
+  
+    // Compare Passwords
+    const user = res.records[0].get('u')
+    const encryptedPassword = user.properties.password
+  
+    const correct = await compare(unencryptedPassword, encryptedPassword)
+  
+    if ( correct === false ) {
+      return false
+    }
+  
+    // Return User Details
+    const { password, ...safeProperties } = user.properties
+  
+    return {
+      ...safeProperties,
+      token: jwt.sign(this.userToClaims(safeProperties), JWT_SECRET),
+    }
   }
+  // async authenticate(email, unencryptedPassword) {
+  //   // TODO: Authenticate the user from the database
+  //   if (email === 'graphacademy@neo4j.com' && unencryptedPassword === 'letmein') {
+  //     const { password, ...claims } = user.properties
+
+  //     return {
+  //       ...claims,
+  //       token: jwt.sign(claims, JWT_SECRET)
+  //     }
+  //   }
+
+  //   return false
+  // }
   // end::authenticate[]
 
 
