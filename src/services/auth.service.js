@@ -40,43 +40,61 @@ export default class AuthService {
   async register(email, plainPassword, name) {
     const encrypted = await hash(plainPassword, parseInt(SALT_ROUNDS))
 
+    // CREATE CONSTRAINT UserEmailUnique
+    // IF NOT EXISTS
+    // FOR (user:User)
+    // REQUIRE user.email IS UNIQUE;
+    
     // tag::constraintError[]
     // TODO: Handle Unique constraints in the database
-    if (email !== 'graphacademy@neo4j.com') {
-      throw new ValidationError(`An account already exists with the email address ${email}`, {
-        email: 'Email address taken'
-      })
-    }
+    // if (email !== 'graphacademy@neo4j.com') {
+    //   throw new ValidationError(`An account already exists with the email address ${email}`, {
+    //     email: 'Email address taken'
+    //   })
+    // }
     // end::constraintError[]
 
     // TODO: Save user
     const session = this.driver.session()
-    const res = await session.executeWrite(
-      tx => tx.run(
-        `
-        CREATE (u:User {
-          userId: randomUuid(),
-          email: $email,
-          password: $encrypted,
-          name: $name
-        })
-        RETURN u
-      `,
-      { email, encrypted, name }
+    try {
+      const res = await session.executeWrite(
+        tx => tx.run(
+          `
+          CREATE (u:User {
+            userId: randomUuid(),
+            email: $email,
+            password: $encrypted,
+            name: $name
+          })
+          RETURN u
+        `,
+        { email, encrypted, name }
+        )
       )
-    )
-    const [ first ] = res.records
-    const node = first.get('u')
+      const [ first ] = res.records
+      const node = first.get('u')
+  
+      const { password, ...safeProperties } = node.properties
+  
+      return {
+        ...safeProperties,
+        token: jwt.sign(this.userToClaims(safeProperties), JWT_SECRET),
+      }
+    } catch(e) {
+      if (e.code === 'Neo.ClientError.Schema.ConstraintValidationFailed') {
+        throw new ValidationError(
+          `An account already exists with the email address ${email}`,
+          {
+            email: 'Email address already taken'
+          }
+        )
+      }
+      throw e
 
-
-    const { password, ...safeProperties } = node.properties
-    await session.close()
-
-
-    return {
-      ...safeProperties,
-      token: jwt.sign(this.userToClaims(safeProperties), JWT_SECRET),
+    } finally {
+      await session.close()
     }
+
   }
   // end::register[]
 
